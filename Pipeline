@@ -1,0 +1,92 @@
+pipeline {
+    agent any
+
+    environment {
+        IMAGE_NAME = "suresh18102005/cab-booking"
+        IMAGE_TAG = "${BUILD_NUMBER}"
+    }
+
+    stages {
+
+        stage('Clone Repository') {
+            steps {
+                git branch: 'main',
+                url: 'https://github.com/sureshi2023-ux/CAB_BOOKING.git'
+            }
+        }
+
+        stage('Build & Test (Maven)') {
+            steps {
+                bat 'mvn clean package'
+            }
+        }
+
+        stage('Build Docker Image') {
+            steps {
+                bat "docker build -t %IMAGE_NAME%:%IMAGE_TAG% ."
+            }
+        }
+
+        stage('Login to DockerHub') {
+            steps {
+                withCredentials([usernamePassword(
+                    credentialsId: 'DOCKER',
+                    usernameVariable: 'DOCKER_USER',
+                    passwordVariable: 'DOCKER_PASS'
+                )]) {
+                    bat """
+                    docker login -u %DOCKER_USER% -p %DOCKER_PASS%
+                    """
+                }
+            }
+        }
+
+        stage('Push Docker Image') {
+            steps {
+                bat "docker push %IMAGE_NAME%:%IMAGE_TAG%"
+            }
+        }
+
+        stage('Deploy to Kubernetes') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                    bat """
+                    
+                    echo Applying Deployment...
+                    kubectl apply -f deployment.yaml
+
+                    echo Applying Service...
+                    kubectl apply -f service.yaml
+
+                    echo Updating Image...
+                    kubectl set image deployment/cab-booking-deployment cab-booking-container=%IMAGE_NAME%:%IMAGE_TAG%
+
+                    """
+                }
+            }
+        }
+
+        stage('Verify Deployment') {
+            steps {
+                withCredentials([file(credentialsId: 'kubeconfig', variable: 'KUBECONFIG')]) {
+                    bat """
+                    echo Pods:
+                    kubectl get pods
+
+                    echo Services:
+                    kubectl get svc
+                    """
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo '✅ Cab Booking CI/CD Pipeline executed successfully!'
+        }
+        failure {
+            echo '❌ Pipeline failed. Check logs.'
+        }
+    }
+}
